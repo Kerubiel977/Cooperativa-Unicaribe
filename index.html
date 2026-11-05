@@ -73,6 +73,7 @@
     const SUPABASE_URL = 'https://eazfgzozyzanoclcrpvd.supabase.co';
     const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_I1bdEmkBhAe7FW1xaT-Zug_0lmTYxXN';
     const SUPABASE_ADMIN_EMAIL = 'samuelmanotas977@gmail.com';
+    const SUPABASE_ADMIN_AR_EMAIL = 'arnolrestrepo36@gmail.com';
     const SUPABASE_BUCKET = 'coop-payment-qr';
     const supabaseConfigured = /^https:\/\//.test(SUPABASE_URL) &&
       !SUPABASE_URL.includes('PEGA_AQUI') &&
@@ -432,9 +433,10 @@
     let adminAuthenticated=false;
     let supabaseAdminUser=null;
     let sharedQrReady=false;
-    // El nombre de usuario visible sigue siendo "admin". Con Supabase activo,
-    // la contraseña se valida en Auth y no se guarda en este HTML.
+    // Los nombres visibles se relacionan con correos de Supabase Auth.
+    // Las contraseñas nunca se guardan en este archivo.
     const ADMIN_USERNAME='admin';
+    const ADMIN_AR_USERNAME='adminAR';
     const $=id=>document.getElementById(id);
     const productById=id=>state.products.find(p=>p.id===id);
     const cartCount=()=>state.cart.reduce((n,x)=>n+x.qty,0);
@@ -817,14 +819,18 @@
     $('adminLoginForm').addEventListener('submit',async e=>{
       e.preventDefault();
       const username=$('adminUsername').value.trim();
+      const normalizedUsername=username.toLowerCase();
       const password=$('adminPassword').value;
       const errorBox=$('adminLoginError');
       errorBox.classList.add('hidden');
       try{
-        if(username!==ADMIN_USERNAME) throw new Error('Usuario o clave incorrectos.');
+        const isMainAdmin=normalizedUsername===ADMIN_USERNAME.toLowerCase() || normalizedUsername===SUPABASE_ADMIN_EMAIL.toLowerCase();
+        const isAdminAR=normalizedUsername===ADMIN_AR_USERNAME.toLowerCase() || normalizedUsername===SUPABASE_ADMIN_AR_EMAIL.toLowerCase();
+        if(!isMainAdmin && !isAdminAR) throw new Error('Usuario o clave incorrectos.');
         if(supabaseClient){
-          if(!SUPABASE_ADMIN_EMAIL || SUPABASE_ADMIN_EMAIL.includes('PEGA_AQUI')) throw new Error('Falta configurar el correo del administrador en SUPABASE_ADMIN_EMAIL.');
-          const {data,error}=await supabaseClient.auth.signInWithPassword({email:SUPABASE_ADMIN_EMAIL,password});
+          const loginEmail=isAdminAR?SUPABASE_ADMIN_AR_EMAIL:SUPABASE_ADMIN_EMAIL;
+          if(!loginEmail || !loginEmail.includes('@')) throw new Error('Falta configurar el correo asociado a esta cuenta administrativa.');
+          const {data,error}=await supabaseClient.auth.signInWithPassword({email:loginEmail,password});
           if(error) throw new Error('No se pudo validar el acceso: '+error.message);
           const {data:adminRow,error:adminError}=await supabaseClient.from('coop_admins').select('user_id').eq('user_id',data.user.id).maybeSingle();
           if(adminError || !adminRow){await supabaseClient.auth.signOut();throw new Error('La cuenta inició sesión, pero no está autorizada como administradora en coop_admins.');}
@@ -869,4 +875,3 @@
   </script>
 </body>
 </html>
-
