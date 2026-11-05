@@ -382,14 +382,34 @@
         if(uploadError) throw new Error('No se pudo subir el QR: '+uploadError.message);
       }
       const payload={id:1,payment_method:state.paymentMethod||'Nequi',payment_holder:state.paymentHolder||'',payment_instructions:state.paymentInstructions||'',payment_qr_path:newPath,updated_at:new Date().toISOString()};
-      const {error:saveError}=await supabaseClient.from('coop_settings').upsert(payload,{onConflict:'id'});
-      if(saveError){
+      // Solicitar la fila devuelta permite detectar escrituras bloqueadas por RLS
+      // que pueden no producir un error visible cuando no se devuelve representación.
+      const {data:savedRow,error:saveError}=await supabaseClient.from('coop_settings')
+        .upsert(payload,{onConflict:'id'})
+        .select('id,payment_method,payment_holder,payment_instructions,payment_qr_path,updated_at')
+        .single();
+      if(saveError || !savedRow){
         if(fileToUpload && newPath) await supabaseClient.storage.from(SUPABASE_BUCKET).remove([newPath]);
-        throw new Error('No se pudo guardar la configuración compartida: '+saveError.message);
+        throw new Error('Supabase no confirmó el cambio de configuración. '+(saveError?.message||'No devolvió la fila actualizada. Revisa la política UPDATE de coop_settings.'));
       }
-      state.paymentQrPath=newPath||'';
-      state.paymentQr=sharedQrUrl(state.paymentQrPath,payload.updated_at);
-      if(oldPath && oldPath!==newPath) await supabaseClient.storage.from(SUPABASE_BUCKET).remove([oldPath]);
+      const valuesMatch = savedRow.payment_qr_path === newPath
+        && savedRow.payment_method === payload.payment_method
+        && savedRow.payment_holder === payload.payment_holder
+        && savedRow.payment_instructions === payload.payment_instructions;
+      if(!valuesMatch){
+        if(fileToUpload && newPath) await supabaseClient.storage.from(SUPABASE_BUCKET).remove([newPath]);
+        throw new Error('Supabase respondió, pero los datos guardados no coinciden con los nuevos. No se reemplazó la configuración anterior. Revisa los permisos de actualización de coop_settings.');
+      }
+      state.paymentMethod=savedRow.payment_method||'Nequi';
+      state.paymentHolder=savedRow.payment_holder||'';
+      state.paymentInstructions=savedRow.payment_instructions||'';
+      state.paymentQrPath=savedRow.payment_qr_path||'';
+      state.paymentQr=sharedQrUrl(state.paymentQrPath,savedRow.updated_at);
+      // Solo borrar la imagen anterior después de comprobar que la nueva ruta quedó guardada.
+      if(oldPath && oldPath!==newPath){
+        const {error:removeOldError}=await supabaseClient.storage.from(SUPABASE_BUCKET).remove([oldPath]);
+        if(removeOldError) console.warn('La configuración nueva quedó guardada, pero no se pudo borrar el QR anterior:',removeOldError.message);
+      }
       save();
       return true;
     }
@@ -849,3 +869,4 @@
   </script>
 </body>
 </html>
+
